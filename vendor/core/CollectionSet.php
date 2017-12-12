@@ -6,8 +6,7 @@ use tzVendor\CollectionItem;
 use tzVendor\CpropertySet;
 use PDO;
 
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_const.php");
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_common.php");
+require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/app/tz_const.php");
 
 class CollectionSet extends Model {
     protected $mditem;
@@ -299,11 +298,26 @@ class CollectionSet extends Model {
         }
         $str0_req .=" FROM tt_et as et";
         $sql = $str0_req.$str_req;
+        $dop = DataManager::get_col_access_text('et');
         if ($strwhere!='')
         {
             $sql .= " WHERE $strwhere";
+            if ($dop!='')
+            {
+                $sql .= " AND ".$dop;
+                $params['userid'] = $_SESSION['user_id'];
+            }    
         }
+        else
+        {
+            if ($dop!='')
+            {
+                $sql .= " WHERE ".$dop;
+                $params['userid'] = $_SESSION['user_id'];
+            }    
+        }    
         $objs['SQL']=$sql;
+        //die('sql = '.$sql.var_dump($params));
 	$res = DataManager::dm_query($sql,$params);
  
         while($row = $res->fetch(PDO::FETCH_ASSOC)) {

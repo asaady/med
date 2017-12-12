@@ -4,10 +4,11 @@ if (!empty($_COOKIE['sid'])) {
     session_id($_COOKIE['sid']);
 }
 session_start();
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_const.php");
+require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/app/tz_const.php");
 require '../vendor/autoload.php';
 
 use tzVendor\InputDataManager;
+use tzVendor\Common_data;
 use tzVendor\Entity;
 use tzVendor\EntitySet;
 use tzVendor\DataManager;
@@ -17,7 +18,7 @@ function getData()
 {
     $idm = new InputDataManager;
     $action_handler = array(
-    'FIELD_FIND'=> function($idm)
+        'FIELD_FIND'=> function($idm)
         {
             $data = $idm->getdata();
             $objs=false;
@@ -28,7 +29,7 @@ function getData()
             { 
                 if ($type=='id')
                 {
-                    $objs = tzVendor\Entity::getEntityByName($id,$name);
+                    $objs = tzVendor\EntitySet::getEntitiesByName($id,$name);
                 }    
                 elseif ($type=='cid') 
                 {
@@ -42,6 +43,17 @@ function getData()
                 {
                     $objs = tzVendor\Mdproperty::getPropertyByName($name,$idm);
                 }
+            }    
+            return $objs; 
+        },  
+        '_PROP_FIND'=> function($idm)
+        {
+            $data = $idm->getdata();
+            $objs=false;
+            $name = $data['name']['name'];
+            if ($name!=="")
+            { 
+                $objs = tzVendor\Mdproperty::getPropertyByName($name,$idm);
             }    
             return $objs; 
         },  
@@ -104,6 +116,56 @@ function getData()
             else 
             {
                 $objs = DataManager::getActionList($idm->getitemid(),$mode,$idm->getaction()); 
+            }
+            return $objs; 
+        },
+    'AFTER_CHOICE'=> function($idm)
+        {
+            $objs=array();
+            $data = $idm->getdata();
+            $itemid = $data['id']['id'];
+            if (!Common_data::check_uuid($itemid))
+            {
+                return $objs;
+            }    
+            $mode = $idm->getmode();
+            $name = $data['name']['name'];
+            $type = $data['type']['name'];
+            if (Common_data::check_uuid($name))
+            { 
+                if ($type=='id')
+                {
+
+                    try 
+                    {
+                        $ent = new Entity($name);
+                    } 
+                    catch (Exception $exc) 
+                    {
+                        return $objs;
+                    }
+                    $ar_md = Entity::getEntityDetails($itemid);
+                    $ar_prop = \tzVendor\MdpropertySet::getMDProperties($ar_md['mdid'], $mode, " WHERE mp.mdid = :mdid ");
+                    foreach ($ar_prop as $prop)
+                    {
+                        if ($prop['type']=='id')
+                        {    
+                            $propid = $prop['propid'];
+                            foreach($ent->properties() as $e_prop)
+                            {
+                                $e_propid = $e_prop['propid'];
+                                if ($e_propid!=$propid)
+                                {
+                                    continue;
+                                }    
+                                $objs[$prop['id']]=array('id'=>$ent->getattrid($e_prop['id']),'name'=>$ent->getattr($e_prop['id']));
+                            }    
+                        }    
+                    }    
+                }    
+                elseif ($type=='cid') 
+                {
+                }
             }
             return $objs; 
         }

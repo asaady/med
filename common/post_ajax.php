@@ -4,7 +4,7 @@ if (!empty($_COOKIE['sid'])) {
     session_id($_COOKIE['sid']);
 }
 session_start();
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_const.php");
+require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/app/tz_const.php");
 require '../vendor/autoload.php';
 use tzVendor\Entity;
 use tzVendor\EntitySet;
@@ -114,20 +114,29 @@ function loadData()
     'Entity_Entity_SET_EDIT_LIST'=> function( $idm) {
         $data = $idm->getdata();
         $mdprop = new Mdproperty($data['filter_id']['id']);
-        $data = array();
-        $data['itemid'] = array('id'=>$mdprop->getpropstemplate()->getvalmdentity()->getid(),'name'=>'');
-        $data['filter_id']= array('id'=>'','name'=>'');
-        $data['filter_val']= array('id'=>'','name'=>'');
-        $data['filter_min']= array('id'=>'','name'=>'');
-        $data['filter_max']= array('id'=>'','name'=>'');
-        if (($mdprop->getpropstemplate()->getvalmdentity()->getmdtypename()=='Cols')||($mdprop->getpropstemplate()->getvalmdentity()->getmdtypename()=='Comps'))
-        {    
-            return CollectionSet::getCollectionByFilter($data,$idm->getmode(),$idm->getaction());
-        }
-        else 
+        $arMD = Entity::getEntityDetails($idm->getcurid());
+        $event_trig = DataManager::get_event_trigger('onSelect',$arMD['mdid'] , $mdprop->getpropstemplate()->getid());
+        if ($event_trig)
         {
-            return EntitySet::getEntitiesByFilter($data,$idm->getmode(),$idm->getaction());
-        }
+            die(var_dump($event_trig));
+        }   
+        else
+        {
+            $data = array();
+            $data['itemid'] = array('id'=>$mdprop->getpropstemplate()->getvalmdentity()->getid(),'name'=>'');
+            $data['filter_id']= array('id'=>'','name'=>'');
+            $data['filter_val']= array('id'=>'','name'=>'');
+            $data['filter_min']= array('id'=>'','name'=>'');
+            $data['filter_max']= array('id'=>'','name'=>'');
+            if (($mdprop->getpropstemplate()->getvalmdentity()->getmdtypename()=='Cols')||($mdprop->getpropstemplate()->getvalmdentity()->getmdtypename()=='Comps'))
+            {    
+                return CollectionSet::getCollectionByFilter($data,$idm->getmode(),$idm->getaction());
+            }
+            else 
+            {
+                return EntitySet::getEntitiesByFilter($data,$idm->getmode(),$idm->getaction());
+            }
+        }    
     },   
     'Entity_Entity_SET_EDIT_CHOICE'=> function( $idm) {
         $entity = new Entity($idm->getcurid());
@@ -240,18 +249,7 @@ function loadData()
     },
     'CollectionItem_VIEW_LOAD'=>function($idm){
         $coll = new CollectionItem($idm->getitemid());
-        if ($coll->getcollectionset()->getmditem()->getname()=='Comps')
-        {    
-            $arData = array();
-            $arData['ITEMID']=$idm->getcurid();
-            $arData['LDATA']=array();
-            $arData['PSET']=array();
-            $arData['actionlist'] = array();
-        }
-        else
-        {    
-            return $coll->getData($idm->getmode(),$idm->getaction());
-        }
+        return $coll->getData($idm->getmode(),$idm->getaction());
     },
     'CollectionItem_EDIT_LOAD'=>function($idm){
         $coll = new CollectionItem($idm->getitemid());

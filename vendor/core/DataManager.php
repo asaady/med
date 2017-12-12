@@ -4,7 +4,7 @@ namespace tzVendor;
 use PDO;
 use PDOStatement;
 
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_const.php");
+require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/app/tz_const.php");
 
 
 class DataManager {
@@ -18,7 +18,7 @@ class DataManager {
         }
         try 
         {  
-            $hDB = new PDO("pgsql:host=localhost;port=5432;dbname=s2bdb;", "postgres","3@141592",[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);//,[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+            $hDB = new PDO("pgsql:host=localhost;port=5432;dbname=".TZ_DBNAME.";", TZ_DBUSER, TZ_DBPASS,[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);//,[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
         } 
         catch(PDOException $e) 
         {  
@@ -38,8 +38,16 @@ class DataManager {
         }    
         else 
         {
-            $sth = self::dm_prepare($sql);
-            $query = $sth->execute($params);
+            try
+            {
+                $sth = self::dm_prepare($sql);
+                $query = $sth->execute($params);
+            } 
+            catch (Exception $ex) 
+            {
+                die($ex->getMessage());  
+            }
+            
         }
         return $sth;
     }    
@@ -846,12 +854,12 @@ class DataManager {
             }    
             else 
             {
-                if ($prop['name_propid']=='user')
+                if ((strtolower($prop['name_propid'])=='user')||(strtolower($prop['name_propid'])=='head'))
                 {
                     $user = CollectionSet::getCDetails($_SESSION['user_id']);
                     $objs[TZ_EMPTY_ENTITY][$prop['id']]= array('name'=>$user['synonym'],'id'=>$_SESSION['user_id']);
                 }    
-                elseif ($prop['name_propid']=='number')
+                elseif (strtolower ($prop['name_propid'])=='number')
                 {
                     $number = self::getNumber($prop['id'])+1;
                     $objs[TZ_EMPTY_ENTITY][$prop['id']]= array('name'=>$number,'id'=>'');
@@ -908,14 +916,30 @@ class DataManager {
     }        
     public static function get_md_access_text($edit_mode='')
     {
+        if (($edit_mode=='EDIT')||($edit_mode=='SET_EDIT')||($edit_mode=='CREATE'))
+        {    
+            $dop= self::get_access_text('md','write');
+        }
+        else
+        {
+            $dop= self::get_access_text('md','read');
+        } 
+        return $dop;
+    }        
+    public static function get_col_access_text($ttname)
+    {
+        return self::get_access_text($ttname,'read','AccessRightCom');
+    }        
+    public static function get_access_text($ttname,$mode='read',$ra_tbl='RoleAccess')
+    {
         $dop='';
         if (!User::isAdmin())
         {        
-            $dop=" AND md.id in (SELECT pv.value FROM \"CPropValue_mdid\" as pv 
+            $dop = "$ttname.id in (SELECT pv.value FROM \"CPropValue_mdid\" as pv 
 		inner join \"CTable\" as ct
 			inner join \"MDTable\" as md_ra
 			on ct.mdid = md_ra.id
-			and md_ra.name='RoleAccess'
+			and md_ra.name='".$ra_tbl."'
 			inner join \"CPropValue_cid\" as pv_rol
 				inner join \"CProperties\" as cp_rol
 				on pv_rol.pid=cp_rol.id
@@ -931,31 +955,16 @@ class DataManager {
 					on pv_usrol.id=pv_usr.id
 				on pv_rol.value=pv_usrol.value
 				and pv_rol.id<>pv_usrol.id
-			on ct.id = pv_rol.id";
-            if (($edit_mode=='EDIT')||($edit_mode=='SET_EDIT')||($edit_mode=='CREATE'))
-            {    
-		$dop .=" inner join \"CPropValue_bool\" as ct_wr
-				inner join \"CProperties\" as cp_wr
-				on ct_wr.pid=cp_wr.id
-				and cp_wr.name='write'
-			on ct.id = ct_wr.id
-                        AND ct_wr.value 
-		on pv.id=ct.id
-                where pv_usr.value = :userid)";
-            }
-            else
-            {
-		$dop .=" inner join \"CPropValue_bool\" as ct_rd
+			on ct.id = pv_rol.id
+                        inner join \"CPropValue_bool\" as ct_rd
 				inner join \"CProperties\" as cp_rd
 				on ct_rd.pid=cp_rd.id
-				and cp_rd.name='read'
+				and cp_rd.name= '".$mode."'
 			on ct.id = ct_rd.id
 			AND ct_rd.value 
 		on pv.id=ct.id
                 where pv_usr.value = :userid)";
-                
-            }    
-        }    
+        }  
         return $dop;
     }        
     public static function getTT_entity($ttname,$mdid,$propid,$val,$type,$oper)
@@ -988,7 +997,7 @@ class DataManager {
         self::droptemptable($ar_tt0);
         return $res;
     }   
-    public static function getTT_from_ttent($ttname,$tt_ent,$propid,$type,$tt_val='')
+    public static function getTT_from_ttent($ttname,$tt_ent,$propid,$type,$tt_val='',$existonly=TRUE)
     {        
         $ar_tt0 = array();
         $params=array();
@@ -1000,34 +1009,36 @@ class DataManager {
                     . "on it.propid=pt.id "
                     . "and pt.propid=:propid"; 
         $ar_tt0[] = DataManager::createtemptable($sql, 'tt_per0',$params);
-
+            
         $sql = "SELECT max(it.dateupdate) AS dateupdate, it.entityid, it.propid FROM \"IDTable\" as it INNER JOIN tt_per0 AS et ON it.entityid=et.entityid AND it.propid=et.propid
                       GROUP BY it.entityid, it.propid";
         $ar_tt0[] = DataManager::createtemptable($sql, 'tt_it0');
-
-        if ($tt_val=='')
+        $sqlfilt = '';
+        if ($tt_val!='')
         {
-            $sql = "SELECT tper.entityid, tper.propid, pv.value FROM tt_it0 AS tper 
-                            INNER JOIN \"IDTable\" as it
-                                INNER JOIN \"PropValue_$type\" AS pv
-                                ON it.id = pv.id
-                            ON tper.entityid = it.entityid
-                            AND tper.propid=it.propid
-                            AND tper.dateupdate=it.dateupdate";
-        }   
-        else 
-        {
-            $sql = "SELECT tper.entityid, tper.propid, pv.value FROM tt_it0 AS tper 
-                            INNER JOIN \"IDTable\" as it
-                                INNER JOIN \"PropValue_$type\" AS pv
-                                    inner join $tt_val AS ch
-                                    on pv.value=ch.id
-                                ON it.id = pv.id
-                            ON tper.entityid = it.entityid
-                            AND tper.propid=it.propid
-                            AND tper.dateupdate=it.dateupdate";
+            $sqlfilt = " inner join $tt_val AS ch on pv.value=ch.id ";
         }
-
+        if ($existonly)
+        {
+            $sql = "SELECT tper.entityid, tper.propid, pv.value FROM tt_it0 AS tper 
+                            INNER JOIN \"IDTable\" as it
+                                INNER JOIN \"PropValue_$type\" AS pv$sqlfilt
+                                ON it.id = pv.id
+                            ON tper.entityid = it.entityid
+                            AND tper.propid=it.propid
+                            AND tper.dateupdate=it.dateupdate";
+        }    
+        else
+        {
+            $sql = "SELECT tper.entityid, tper.propid, pv.value FROM tt_it0 AS tper 
+                            LEFT JOIN \"IDTable\" as it
+                                INNER JOIN \"PropValue_$type\" AS pv$sqlfilt
+                                ON it.id = pv.id
+                            ON tper.entityid = it.entityid
+                            AND tper.propid=it.propid
+                            AND tper.dateupdate=it.dateupdate";
+        }    
+        
         $res = DataManager::createtemptable($sql, $ttname);
         DataManager::droptemptable($ar_tt0);
         return $res;
@@ -1163,6 +1174,56 @@ class DataManager {
                     on ct.id=pv_usr.id
                     where pv_usr.value = :userid";
 	$res = DataManager::dm_query($sql, array('userid'=>$userid));	
+        return $res->fetchAll(PDO::FETCH_ASSOC);
+    }
+    public static function get_related_fields($propid)
+    {
+        $sql = "select pv_group.value as user_group from \"CTable\" as ct
+                    inner join \"MDTable\" as mt
+                    on ct.mdid = mt.id
+                    and mt.name='RelatedFields'
+                    inner join \"CPropValue_cid\" as pv_lead
+                            inner join \"CProperties\" as cp_lead
+                            on pv_lead.pid=cp_lead.id
+                            and cp_lead.name='prop_lead'
+                    on ct.id=pv_lead.id
+                    inner join \"CPropValue_cid\" as pv_usr
+                            inner join \"CProperties\" as cp_usr
+                            on pv_usr.pid=cp_usr.id
+                            and cp_usr.name='user'
+                    on ct.id=pv_usr.id
+                    where pv_usr.value = :userid";
+	$res = DataManager::dm_query($sql, array('userid'=>$userid));	
+        return $res->fetchAll(PDO::FETCH_ASSOC);
+    }
+    public static function get_event_trigger($eventname,$mdid,$propid)
+    {
+        $sql = "select ct.id, ct.name, ct.synonym from \"CTable\" as ct
+            inner join \"MDTable\" as mt
+            on ct.mdid = mt.id
+            and mt.name='Trigs'
+            inner join \"CPropValue_cid\" as pv_event
+                inner join \"CProperties\" as cp_event
+                on pv_event.pid = cp_event.id
+                and cp_event.name='event'
+                inner join \"CTable\" as ct_event
+                on pv_event.value = ct_event.id
+                and ct_event.name=:eventname
+            on ct.id = pv_event.id
+            inner join \"CPropValue_mdid\" as pv_object
+                inner join \"CProperties\" as cp_object
+                on pv_object.pid = cp_object.id
+                and cp_object.name='object'
+            on ct.id = pv_object.id
+            and pv_object.value=:mdid
+            inner join \"CPropValue_cid\" as pv_prop
+                inner join \"CProperties\" as cp_prop
+                on pv_prop.pid = cp_prop.id
+                and cp_prop.name='property_template'
+            on ct.id = pv_prop.id
+            and pv_prop.value=:propid";
+        $params = array('eventname'=>$eventname,'mdid'=>$mdid, 'propid'=>$propid);
+	$res = DataManager::dm_query($sql, $params);	
         return $res->fetchAll(PDO::FETCH_ASSOC);
     }
 }  

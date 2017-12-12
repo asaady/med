@@ -1,12 +1,15 @@
 <?php
 namespace tzVendor;
+require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/app/tz_const.php");
+
+use tzVendor\Common_data;
 
 class Route {
         private static function controller_run($controller_path,$controller_name,$action_name,$classname, $arResult)
         {    
             if ($arResult['MODE']=='DOWNLOAD')    
             {
-                $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/controllers/controller_download.php";
+                $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/controller_download.php";
                 $controller_name='Controller_Download';
                 if($controller_name=='Controller_404')
                 {
@@ -20,12 +23,17 @@ class Route {
             if(file_exists($controller_path))
             {
                 require_once("$controller_path");
-            } else {
+            } 
+            else 
+            {
                 die("file not found: $controller_path");
             }
-            if ($classname==''){
+            if ($classname=='')
+            {
                 $controller = new $controller_name();
-            } else {
+            } 
+            else 
+            {
                 $controller = new $controller_name($arResult['ITEMID']);
             }
             $action = $action_name;
@@ -35,7 +43,20 @@ class Route {
             }
             else
             {
-                die("action not found : $action for controller $controller_name");
+                if ($arResult['MODE']=='API') 
+                {
+                    $data = array();
+                    $data['STATUS']="ERROR";
+                    $data['MESSAGE']="action not found : $action for controller $controller_name";
+                    Common_data::_log(TZ_API_LOG,$data['MESSAGE']);
+                    header('Content-type: application/xml');
+                    echo Common_data::toXml($data);
+                    return;
+                }   
+                else
+                {
+                    die("action not found : $action for controller $controller_name");
+                }    
             }
         
         }        
@@ -69,6 +90,13 @@ class Route {
                         if ( !empty($routes[3+$step]) )
                         {    
                             $param=trim($routes[3+$step]);
+                            $act = strtolower($param);
+                            $res = CollectionSet::isExistCollItemByName('Action',$act);
+                            if ($res)
+                            {
+                                $arResult['ACTION']= strtoupper($act);
+                                $action_name = 'action_'.$act;
+                            }
                         }    
                     }    
                 }    
@@ -80,7 +108,7 @@ class Route {
                 $action_name = 'action_index';
                 $controller_name = 'Controller_404';    
                 $controller_file = strtolower($controller_name).'.php';
-                $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/controllers/".$controller_file;
+                $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/".$controller_file;
                 $item = array();
             }
             else 
@@ -102,44 +130,85 @@ class Route {
                     $action_name = 'action_index';
                     $controller_name = 'Controller_404';    
                     $controller_file = strtolower($controller_name).'.php';
-                    $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/controllers/".$controller_file;
+                    $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/".$controller_file;
                 } 
                 else 
                 {
                     $classname = $item['classname'];
                     $controller_name = 'Controller_'.$item['classname'];    
                     $controller_file = strtolower($controller_name).'.php';
-                    $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/controllers/".$controller_file;
+                    $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/".$controller_file;
                     if ($item['classname']=='CollectionItem')
                     {
-                        $coll = new CollectionItem($ritem);
-                        if ($coll->getcollectionset()->getmditem()->getname()=='Comps')
+                        if ($arResult['ACTION']<>'EDIT')
                         {
-                            $classname = '';
-                            $action_name = 'action_index';
-                            $controller_name = 'Controller_404';    
-                            $controller_file = strtolower($controller_name).'.php';
-                            $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/controllers/".$controller_file;
-
-                            $model_name = $coll->getname();
-                            $compname = $model_name;
-                            $model_file = $compname.'.php';
-                            $model_path = "app/components/".strtolower($coll->getcollectionset()->getname())."/".strtolower($compname)."/".$model_file;
-                            if(file_exists($model_path))
+                            $coll = new CollectionItem($ritem);
+                            if ($coll->getcollectionset()->getmditem()->getname()=='Comps')
                             {
-                                $tcontroller_name = 'Controller_'.$model_name;
-                                $tcontroller_path = "app/components/".strtolower($coll->getcollectionset()->getname())."/".strtolower($compname)."/".$tcontroller_name.'.php';
-                                if(file_exists($controller_path))
+                                $model_name = $coll->getname();
+                                $compname = $model_name;
+                                $model_file = $compname.'.php';
+                                $model_path = "app/components/".strtolower($coll->getcollectionset()->getname())."/".strtolower($compname)."/".$model_file;
+                                if(file_exists($model_path))
                                 {
-                                    $classname = $item['classname'];
-                                    $controller_path = $tcontroller_path;
-                                    $controller_name = $tcontroller_name;
-                                    include $model_path;
-                                    include $controller_path;
+                                    if (strtolower($item['typename'])=='reps')
+                                    {    
+                                        $tcontroller_name = 'Controller_'.$model_name;
+                                        $tcontroller_path = "app/components/".strtolower($coll->getcollectionset()->getname())."/".strtolower($compname)."/".$tcontroller_name.'.php';
+                                        if(file_exists($controller_path))
+                                        {
+                                            $classname = $item['classname'];
+                                            $controller_path = $tcontroller_path;
+                                            $controller_name = $tcontroller_name;
+                                            include $model_path;
+                                            include $controller_path;
+                                        }
+                                    }
+                                    elseif (strtolower($item['typename'])=='utils')
+                                    {    
+                                        $tcontroller_name = 'Controller_'.$model_name;
+                                        $tcontroller_path = "app/components/".strtolower($coll->getcollectionset()->getname())."/".strtolower($compname)."/".$tcontroller_name.'.php';
+                                        if(file_exists($controller_path))
+                                        {
+                                            $classname = $item['classname'];
+                                            $controller_path = $tcontroller_path;
+                                            $controller_name = $tcontroller_name;
+                                            include $model_path;
+                                            include $controller_path;
+                                        }
+                                    }    
+
                                 }
-                            }
+                                else 
+                                {
+                                    $classname = '';
+                                    $action_name = 'action_index';
+                                    $controller_name = 'Controller_404';    
+                                    $controller_file = strtolower($controller_name).'.php';
+                                    $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/".$controller_file;
+                                    error_log ("file not exist: ".$model_path, 0);
+                                }
+                            }    
                         } 
-                    }    
+                    }
+                    else 
+                    {
+                        if ($curid!='')
+                        {    
+                            if ($item['classname']=='Entity')
+                            {
+                                $curitem = DataManager::getContentByID($curid);
+                                if ($curitem['classname']=='Mdproperty')
+                                {    
+                                    $arprop = Mdproperty::getProperty($curid);
+                                    if ($arprop['valmdtypename']=='Sets')
+                                    {
+                                        $arResult['ACTION'] = 'SET_'.$arResult['ACTION'];
+                                    }    
+                                }    
+                            }    
+                        }    
+                    }
                 }
             }
             return $arResult;    
@@ -149,101 +218,128 @@ class Route {
         static function start()
 	{
                 
-		$controller_name = 'controller';
-		$action_name = 'action_index';
-                
-		// контроллер и действие по умолчанию
-                
-                
-		$routes = explode('/', filter_input(INPUT_SERVER, 'REQUEST_URI', FILTER_SANITIZE_STRING));
-                $ritem = '';
-		if ( !empty($routes[1]) )
-		{
-                    $ritem = trim($routes[1]);
-                }	
-                $arResult = array();
-                $step=0;
-                $arResult['PREFIX']='';
-                $arResult['ACTION']='VIEW';
-                $arResult['CURID']='';
-                $arResult['TITLE']='WS2B';
-                $arResult['ITEMID']='';
-                $arResult['MODE']='ENTERPRISE';
-                $arResult['PARAM']='';
-                $arSubSystems = DataManager::getSubSystems();
-                if (!User::isAuthorized())
+            $controller_name = 'controller';
+            $action_name = 'action_index';
+
+            // контроллер и действие по умолчанию
+
+
+            $routes = explode('/', filter_input(INPUT_SERVER, 'REQUEST_URI', FILTER_SANITIZE_STRING));
+            $ritem = '';
+            if ( !empty($routes[1]) )
+            {
+                $ritem = trim($routes[1]);
+            }	
+            $arResult = array();
+            $step=0;
+            $arResult['PREFIX']='';
+            $arResult['ACTION']='VIEW';
+            $arResult['PAGE']=1;
+            $arResult['CURID']='';
+            $arResult['TITLE']=TZ_COMPANY_SHORTNAME;
+            $arResult['ITEMID']='';
+            $arResult['MODE']='ENTERPRISE';
+            $arResult['PARAM']='';
+            if (strtolower(trim($ritem))=='api')
+            {
+                //Это вызов API 
+                $controller_name = 'Controller_API';
+                $controller_file = strtolower($controller_name).'.php';
+                $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/".$controller_file;
+                $arResult['ACTION']= strtoupper(trim($routes[2]));
+                $arResult['MODE']='API';
+                $classname='';
+                if ( !empty($routes[2]) )
                 {
-                    $arResult['MODE']='AUTH';
-                    $username = 'Anonymous';
-                    $item = '';
-                    $classname = '';
-                    $action_name = 'action_index';    
-                    $controller_name = 'Controller_Auth';
-                    $controller_file = strtolower($controller_name).'.php';
-                    $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/controllers/".$controller_file;
+                    $action_name = 'action_'. strtolower(trim($routes[2]));
+                    if ( !empty($routes[3]) )
+                    {
+                        $arResult['PARAM'] = trim($routes[3]);
+                    }	
+                }	
+                Route::controller_run($controller_path,$controller_name,$action_name,$classname, $arResult);
+                return;
+            }    
+            $arSubSystems = DataManager::getSubSystems();
+            if (!User::isAuthorized())
+            {
+                $arResult['MODE']='AUTH';
+                $username = 'Anonymous';
+                $item = '';
+                $classname = '';
+                $action_name = 'action_index';    
+                $controller_name = 'Controller_Auth';
+                $controller_file = strtolower($controller_name).'.php';
+                $controller_path = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/vendor/controllers/".$controller_file;
+            }
+            else 
+            {
+                $username = User::getUserName($_SESSION['user_id']);
+                if (strtolower(trim($ritem))=='download')
+                {
+                    $arResult['MODE']='DOWNLOAD';
+                    $ritem = trim($routes[2]);
+                    $step=1;
+                }    
+                elseif (strtolower(trim($ritem))=='print')
+                {
+                    //Это вызов печатной формы
+                    $arResult['MODE']='PRINT';
+                    $ritem = trim($routes[2]);
+                    $step=1;
                 }
                 else 
                 {
-                    $username = User::getUserName($_SESSION['user_id']);
-                    if (strtolower(trim($ritem))=='download')
-                    {
-                        $arResult['MODE']='DOWNLOAD';
-                        $ritem = trim($routes[2]);
-                        $step=1;
-                    }    
+                    if (User::isAdmin())
+                    {    
+                        if (strtolower(trim($ritem))=='config')
+                        {
+                            $arResult['MODE']='CONFIG';
+                            $arResult['PREFIX']='/config';
+                            $arResult['ACTION']='EDIT';
+                            $step=1;
+                            $ritem='';
+                            if ( !empty($routes[1+$step]) )
+                            {
+                                $ritem = trim($routes[1+$step]);
+                            }	
+                            $arSubSystems = Mditem::getAllMDitems();
+                        }    
+                    }
                     else 
-                    {
-                        if (User::isAdmin())
-                        {    
-                            if (strtolower(trim($ritem))=='config')
-                            {
-                                $arResult['MODE']='CONFIG';
-                                $arResult['PREFIX']='/config';
-                                $arResult['ACTION']='EDIT';
-                                $step=1;
-                                $ritem='';
-                                if ( !empty($routes[1+$step]) )
-                                {
-                                    $ritem = trim($routes[1+$step]);
-                                }	
-                                $arSubSystems = Mditem::getAllMDitems();
-                            }    
-                        }
-                        else 
-                        { 
-                            $cur_interface = User::getUserInterface();
+                    { 
+                        $cur_interface = User::getUserInterface();
 
-                            if ($cur_interface)    
-                            {
-                                $arSubSystems = DataManager::getInterfaceContents($cur_interface);
-                            }    
-                        }
+                        if ($cur_interface)    
+                        {
+                            $arSubSystems = DataManager::getInterfaceContents($cur_interface);
+                        }    
                     }
-                    if (!count($arSubSystems)) 
-                    {
-                        die("main menu is empty");
-                    }
-                    if ($ritem=='')
-                    {
-                       foreach ($arSubSystems as $row)
-                       {
-                           $ritem = $row['id'];
-                           break;
-                       }    
-                    }   
-                    $arResult = Route::getController($routes,$arResult, $step, $controller_path, $controller_name,$action_name,$classname,$ritem);
                 }
-                $arResult['MENU']=array();
-                foreach($arSubSystems as $is) 
+                if (!count($arSubSystems)) 
                 {
-                    $arResult['MENU'][] = array('ID' => $is['id'],
-                                                'NAME' => $is['name'],
-                                                'SYNONYM' => trim($is['synonym'])
-                                                    );
+                    die("main menu is empty");
                 }
-                $arResult['TITLE']='WS2B '.$username;
-                Route::controller_run($controller_path,$controller_name,$action_name,$classname, $arResult);
-
+                if ($ritem=='')
+                {
+                   foreach ($arSubSystems as $row)
+                   {
+                       $ritem = $row['id'];
+                       break;
+                   }    
+                }  
+                $arResult = Route::getController($routes,$arResult, $step, $controller_path, $controller_name,$action_name,$classname,$ritem);
+            }
+            $arResult['MENU']=array();
+            foreach($arSubSystems as $is) 
+            {
+                $arResult['MENU'][] = array('ID' => $is['id'],
+                                            'NAME' => $is['name'],
+                                            'SYNONYM' => trim($is['synonym'])
+                                                );
+            }
+            $arResult['TITLE']=TZ_COMPANY_SHORTNAME.' '.$username;
+            Route::controller_run($controller_path,$controller_name,$action_name,$classname, $arResult);
         }
 
 	function ErrorPage404()

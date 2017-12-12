@@ -12,8 +12,10 @@ class Entity extends Model {
     protected $num;
     protected $data;
     protected $plist;
+    protected $mode;
     
-    public function __construct($id,$version=0) {
+    public function __construct($id,$version=0,$mode='')
+    {
         if ($id=='') {
             throw new Exception("Class Entity constructor: id is empty");
         }
@@ -33,7 +35,8 @@ class Entity extends Model {
         $this->enumber = $this->getpropnumber();
         $this->synonym = $this->name;
         $this->name = $this->gettoString();
-        $prop_activity = array_search("Activity", array_column($this->plist,'name','id'));
+        $this->mode = $mode;
+        $prop_activity = array_search("activity", array_column($this->plist,'name','id'));
         if ($prop_activity!==FALSE)
         {    
             $this->activity = $this->getattr($prop_activity); 
@@ -43,25 +46,36 @@ class Entity extends Model {
             $this->activity = TRUE;
         }
     }
-    function entity_data() {
+    function getdata() 
+    {
+        return $this->data;
+    }
+    function entity_data() 
+    {
         $arProp = array();
-	if ($this->id!='') {
-	  $arData = self::getEntityData($this->id);
-          if (count($arData['SDATA'])) {
-              $arProp = $arData['SDATA'][$this->id];
-          }
+	if ($this->id!='') 
+        {
+            $arData = self::getEntityData($this->id,$this->mode);
+            if (count($arData['SDATA'])) 
+            {
+                $arProp = $arData['SDATA'][$this->id];
+            }
 	}
         $this->version = time();
         $data = array();
 
         
-	foreach($this->plist as $aritem){
+	foreach($this->plist as $aritem)
+        {
 	    $v = $aritem['id'];
             $data[$v]=array();
-	    if(array_key_exists($v,$arProp)){
+	    if(array_key_exists($v,$arProp))
+            {
 	      $data[$v]['id']=$arProp[$v]['id'];
 	      $data[$v]['name']=$arProp[$v]['name'];
-	    }else {
+	    }
+            else 
+            {
      	      $data[$v]['id']=TZ_EMPTY_ENTITY;
 	      $data[$v]['name']='';
 	    }  
@@ -71,13 +85,17 @@ class Entity extends Model {
     function getshortname()
     {
         $res = $this->name;
-        if (strlen($res)>40)
+        if (strlen($res)>55)
         {    
-            $res = substr($res, 0, 40);
+            $res = substr($res, 0, 55);
             $end = strlen(strrchr($res, ' ')); // длина обрезка 
             $res = substr($res, 0, -$end) . '...';         
         }    
         return $res;
+    }
+    function getactivity()
+    {
+        return $this->activity;
     }
     function getmdentity()
     {
@@ -119,7 +137,7 @@ class Entity extends Model {
             {    
                 if ($sprop['valmdtypename']=='Items')
                 {
-                    $sets[$prop['id']]= MdpropertySet::getMDProperties($sprop['valmdid'],$mode," WHERE mp.mdid = :mdid ",true);
+                    $sets[$prop['id']]= MdpropertySet::getMDProperties($sprop['valmdid'],$mode," WHERE mp.mdid = :mdid and mp.ranktoset>0 ",true);
                     break;
                 }    
             }
@@ -138,6 +156,7 @@ class Entity extends Model {
                 'navlist'=>$navlist
         );        
     }
+    
     public static function get_set_by_item($itemid)
     {
         $sql="SELECT parentid, childid, rank FROM \"SetDepList\" where childid = :itemid";
@@ -255,6 +274,13 @@ class Entity extends Model {
             {
                 $datetime = new DateTime($this->edate);
                 $res = $this->mdentity->getsynonym()." №".$this->enumber." от ".$datetime->format('d-m-y').$res;
+            }
+            else    
+            {
+                if ($res!='')
+                {
+                    $res = substr($res, 1);
+                }    
             }    
             return $res;
         }
@@ -415,7 +441,7 @@ class Entity extends Model {
     {
 	$res = DataManager::dm_query("BEGIN");
         $id = $this->id;
-        $propid = array_search('Activity', array_column($this->plist,'name','id'));
+        $propid = array_search('activity', array_column($this->plist,'name','id'));
         if ($propid!==FALSE)
         {
             $params = array();
@@ -544,7 +570,7 @@ class Entity extends Model {
                 if (($valid!=TZ_EMPTY_ENTITY)&&($valid!=''))  
                 {
                     $curmd=self::getEntityDetails($valid);
-                    if (($curmd['mdtypename']=='Sets') || ($curmd['mdtype']=='Items'))
+                    if (($curmd['mdtypename']=='Sets') || ($curmd['mdtypename']=='Items'))
                     {
                         if ($this->id!='')
                         {
@@ -582,7 +608,7 @@ class Entity extends Model {
                 {
                     if ($valname=='') 
                     {
-                        if ($prop['name_propid']=='Activity')
+                        if (strtolower($prop['name_propid'])=='activity')
                         {
                             $valname='true';
                         }    
@@ -707,7 +733,7 @@ class Entity extends Model {
             if ($curid!='')
             {
                 $arr_e[] =$curid;
-                $ent = new Entity($curid);
+                $ent = new Entity($curid,$mode);
                 foreach($objs['PLIST'] as $row) 
                 {
                     if ($row['valmdid']==$ent->getmdentity()->getid())
@@ -861,47 +887,6 @@ class Entity extends Model {
         }   
 	return $objs;
     }
-    public static function getEntityByName($mdid,$name) 
-    {
-        $artt = array();
-	$sql = "select et.id, pv.value as name, it.dateupdate FROM \"PropValue_str\" as pv
-                inner join \"IDTable\" as it
-                    inner join \"ETable\" as et
-                    on it.entityid=et.id
-                    inner join \"MDProperties\" as mp
-                        inner join \"CTable\" as pt
-                        on mp.propid=pt.id
-                    on it.propid=mp.id
-                on pv.id=it.id
-		WHERE et.mdid=:mdid and mp.mdid = et.mdid and pv.value ILIKE :name LIMIT 30";  
-        
-        $artt[] = DataManager::createtemptable($sql,'tt_et',array('mdid'=>$mdid, 'name'=>"%$name%"));   
-        
-	$sql = "select id, max(dateupdate) as dateupdate FROM tt_et group by id";
-        $artt[] = DataManager::createtemptable($sql,'tt_nml');   
-        
-	$sql = "select et.id, et.name FROM tt_et as et inner join tt_nml as nm on et.id=nm.id and et.dateupdate=nm.dateupdate";
-        $artt[] = DataManager::createtemptable($sql,'tt_nm');   
-
-        
-	$sql = "select et.id, et.name, COALESCE(pv.value,TRUE) as activity, COALESCE(it.dateupdate,'epoch'::timestamp) as dateupdate FROM tt_nm as et 
-                left join \"IDTable\" as it
-                    inner join \"MDProperties\" as mp
-                    on it.propid=mp.id
-                    and mp.name='Activity'
-                    inner join \"PropValue_bool\" as pv
-                    on it.id=pv.id
-                on et.id=it.entityid";  
-        $artt[] = DataManager::createtemptable($sql,'tt_act');   
-        
-	$sql = "select id, max(dateupdate) as dateupdate FROM tt_act group by id";
-        $artt[] = DataManager::createtemptable($sql,'tt_actl');   
-	$sql = "select et.id, et.name FROM tt_act as et inner join tt_actl as nm on et.id=nm.id and et.dateupdate=nm.dateupdate and et.activity LIMIT 5";
-	$res = DataManager::dm_query($sql);
-	$objs = $res->fetchAll(PDO::FETCH_ASSOC);
-        DataManager::droptemptable($artt);
-        return $objs;
-    }
     public static function getMDSetItem($mdid) 
     {
 	$sql = DataManager::get_select_properties(" WHERE mi.name='Items' and mp.mdid = :mdid");
@@ -921,7 +906,7 @@ class Entity extends Model {
             return $objs;
         }    
 	$mdid = $arSetItemProp['valmdid'];
-	$objs['PSET'] = MdpropertySet::getMDProperties($mdid,$mode," WHERE mp.mdid = :mdid ",true);
+	$objs['PSET'] = MdpropertySet::getMDProperties($mdid,$mode," WHERE mp.mdid = :mdid and mp.ranktoset>0 ",true);
                 
         if ($this->id=='')
         {
@@ -980,6 +965,7 @@ class Entity extends Model {
                         ON pt.id=ct.id
 		    ON mp.propid=pt.id
 		ON t.propid=mp.id
+                and mp.ranktoset>0
 		LEFT JOIN \"PropValue_str\" AS pv_str
 		ON t.id = pv_str.id	
 		LEFT JOIN \"PropValue_id\" AS pv_id
@@ -1021,7 +1007,7 @@ class Entity extends Model {
         
         $sql = "SELECT * FROM tt_lv"; 
 	$res = DataManager::dm_query($sql);
-        $activity_id = array_search('Activity', array_column($objs['PSET'],'name','id'));
+        $activity_id = array_search('activity', array_column($objs['PSET'],'name','id'));
         $arr_e=array();
         foreach ($sobjs['rows'] as $row)
         {
@@ -1101,6 +1087,10 @@ class Entity extends Model {
                 {
                     continue;
                 }    
+                if ($prow['valmdtypename']=='Sets')
+                {
+                    continue;
+                }
                 foreach($objs['LDATA'] as $id=>$row) 
                 {
                     if (array_key_exists($rid, $row))

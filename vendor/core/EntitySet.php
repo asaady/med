@@ -3,8 +3,7 @@ namespace tzVendor;
 use PDO;
 use DateTime;
 
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_common.php");
-require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/common/tz_const.php");
+require_once(filter_input(INPUT_SERVER, 'DOCUMENT_ROOT', FILTER_SANITIZE_STRING)."/app/tz_const.php");
 
 class EntitySet extends Model {
     protected $mditem;     
@@ -51,18 +50,14 @@ class EntitySet extends Model {
         return $entity->createNew();
     }
     
-    function createtemptable_all($entities,$mdid)
+    function createtemptable_all($tt_entities,$mdid)
     {
-        $str_entities = "('".implode("','", $entities)."')";
 	$artemptable = array();
-	$show_deleted_rows = DataManager::getSetting("show_deleted_rows");
-        $sql = DataManager::get_select_entities($str_entities,$show_deleted_rows);
-        $artemptable[0] = DataManager::createtemptable($sql,'tt_et');   
         
         $sql = DataManager::get_select_properties(" WHERE mp.mdid=:mdid AND mp.rank>0 ");
         $artemptable[1]= DataManager::createtemptable($sql,'tt_pt',array('mdid'=>$mdid));   
         
-        $sql=DataManager::get_select_maxupdate('tt_et','tt_pt');
+        $sql=DataManager::get_select_maxupdate($tt_entities,'tt_pt');
         $artemptable[2] = DataManager::createtemptable($sql,'tt_id');   
         
         
@@ -96,48 +91,38 @@ class EntitySet extends Model {
         return $artemptable;    
     }
 
-    public static function findEntitiesByProp($filter,$access_prop) {
+    public static function get_EntitiesFromList($entities,$ttname) 
+    {
+        $str_entities = "('".implode("','", $entities)."')";
+        $sql = DataManager::get_select_entities($str_entities);
+        return DataManager::createtemptable($sql,$ttname);
+    }
+    public static function get_findEntitiesByProp($ttname, $mdid, $propid, $ptype, $access_prop, $filter ,$limit) 
+    {
 //      $filter: array 
 //      id = property id (MDProperties)
 //      val = filter value
 //      val_min = min filter value (optional)    
 //      val_max = max filter value (optional)    
-        $ftype='';
-        $dbtable = '';
-        $propid = $filter['filter_id']['id'];
-        $rec_limit = TZ_COUNT_REC_BY_PAGE*2;
+        $params = array();
+        $rec_limit = $limit*2;
         $prop_templ_id = '';
+        $strwhere = '';
+        $arprop = array();
+        $mdentity = new Mdentity($mdid);
         if ($propid!='')
         {
-            $arprop = Mdproperty::getProperty($propid);
-            if ($arprop['type']=='text')
+            if ($ptype<>'text')
             {
-                return array();
-            }
-            $dbtable = "PropValue_$arprop[type]";
-            $prop_templ_id = $arprop['propid'];
-            $ftype=$arprop['type'];
-            $mdid = $arprop['mdid'];
-        }
-        else
-        {
-            if ($filter['itemid']['id']!='')
-            {
-                $mdid = $filter['itemid']['id'];
-            }
-            else 
-            {
-                return array();
+                $prop_templ_id = $arprop['propid'];
+                $strwhere = DataManager::getstrwhere($filter,$ptype,'pv.value',$params);
             }
         }
-        $strwhere = DataManager::getstrwhere($filter,$ftype,'pv.value',$params);
-        $params = array();
-        $mdentity = new Mdentity($mdid);
         if ($strwhere!='')
         {
             $strorder = "";
             $strjoin = "it.entityid";
-            $sql = "SELECT DISTINCT it.entityid FROM \"$dbtable\" as pv INNER JOIN \"IDTable\" as it ON pv.id=it.id AND it.propid=:propid"; 
+            $sql = "SELECT DISTINCT it.entityid as id FROM \"PropValue_$ptype\" as pv INNER JOIN \"IDTable\" as it ON pv.id=it.id AND it.propid=:propid"; 
             $params['propid']=$propid;
         }
         else
@@ -149,7 +134,7 @@ class EntitySet extends Model {
                 $strwhere = "";
                 $strorder = " order by pv.value DESC";
                 $strjoin = "it.entityid";
-                $sql = "SELECT it.entityid, pv.value FROM \"PropValue_date\" as pv INNER JOIN \"IDTable\" as it ON pv.id=it.id AND it.propid=:propid"; 
+                $sql = "SELECT it.entityid as id, pv.value FROM \"PropValue_date\" as pv INNER JOIN \"IDTable\" as it ON pv.id=it.id AND it.propid=:propid"; 
                 $params['propid']=$key_edate;
             }        
             else 
@@ -157,8 +142,8 @@ class EntitySet extends Model {
                 $strwhere = " et.mdid=:mdid";
                 $strorder = "";
                 $strjoin = "et.id";
-                $sql = "SELECT et.id as entityid FROM \"ETable\" as et"; 
-                $params=array('mdid'=>$mdid);
+                $sql = "SELECT et.id FROM \"ETable\" as et"; 
+                $params['mdid'] = $mdid;
             }
         }   
         $sql_rls = '';
@@ -178,6 +163,8 @@ class EntitySet extends Model {
                     continue;
                 }    
                 $str_val='';
+                $propname='';
+                $prop_id= '';
                 foreach ($access_prop as $ap)
                 {
                     if ($prop<>$ap['propid'])
@@ -189,23 +176,25 @@ class EntitySet extends Model {
                     {
                         $str_val .= ",'"."$ap[value]"."'";
                     }    
+                    $propname=$ap['propname'];
+                    $prop_id=$ap['propid'];                    
                 }    
                 if ($str_val=='')
                 {
-                    return array();
+                    return '';
                 }    
                 $str_val = "(".substr($str_val,1).")";
                 $props_templ = new PropsTemplate($prop);
                 if ($props_templ->getvalmdentity()->getid()==$mdid)    
                 {
-                    $sql_rls .= " INNER JOIN \"ETable\" as et_$ap[propname] ON et_$ap[propname].id=$strjoin AND et_$ap[propname].id IN $str_val";
+                    $sql_rls .= " INNER JOIN \"ETable\" as et_$propname ON et_$propname.id=$strjoin AND et_$propname.id IN $str_val";
                 }    
                 else
                 {    
                     if (!in_array($ap['propid'], $params))
                     {        
-                        $sql_rls .= " INNER JOIN \"IDTable\" as it_$ap[propname] inner join \"MDProperties\" as mp_$ap[propname] on it_$ap[propname].propid=mp_$ap[propname].id AND mp_$ap[propname].propid=:$ap[propname] inner join \"PropValue_$rls_type\" as pv_$ap[propname] ON pv_$ap[propname].id=it_$ap[propname].id AND pv_$ap[propname].value in $str_val ON it_$ap[propname].entityid=$strjoin";
-                        $params[$ap['propname']]=$ap['propid'];
+                        $sql_rls .= " INNER JOIN \"IDTable\" as it_$propname inner join \"MDProperties\" as mp_$propname on it_$propname.propid=mp_$propname.id AND mp_$propname.propid=:$propname inner join \"PropValue_$rls_type\" as pv_$propname ON pv_$propname.id=it_$propname.id AND pv_$propname.value in $str_val ON it_$propname.entityid=$strjoin";
+                        $params[$propname]=$prop_id;
                     }    
                 }    
             }    
@@ -219,16 +208,8 @@ class EntitySet extends Model {
             $sql .= " WHERE $strwhere";
         }    
         $sql .= " LIMIT $rec_limit";
-        $res = DataManager::dm_query($sql,$params);
-        $objs = array();
-        while($row = $res->fetch(PDO::FETCH_ASSOC)) 
-        {
-            if (!in_array($row['entityid'],$objs))
-            {
-                $objs[] = $row['entityid'];
-            }
-        }
-        return $objs;
+        
+        return DataManager::createtemptable($sql,$ttname,$params);
     }    
     
     public static function get_access_prop()
@@ -291,6 +272,24 @@ class EntitySet extends Model {
 	$res = DataManager::dm_query($sql, array('userid'=>$userid));	
         return $res->fetchAll(PDO::FETCH_ASSOC);
     }
+    
+    static function fill_ent_name($arr_e,$arr_id,&$ldata)
+    {
+        $arr_entities = self::getAllEntitiesToStr($arr_e);
+        foreach($arr_id as $rid=>$prow)
+        {
+            foreach($ldata as $id=>$row) 
+            {
+                if (array_key_exists($rid, $row))
+                {
+                    $crow = $row[$rid];
+                    if (array_key_exists($crow['id'], $arr_entities)){
+                        $ldata[$id][$rid]['name']=$arr_entities[$crow['id']]['name'];
+                    }    
+                }        
+            }
+        }    
+    }
     public static function getEntitiesByFilter($filter, $mode='', $edit_mode='',$limit=TZ_COUNT_REC_BY_PAGE, $page=1, $order='name') 
     {
     	$objs = array();
@@ -298,16 +297,45 @@ class EntitySet extends Model {
 	$objs['LDATA'] = array();
 	$objs['PSET'] = array();
         $objs['actionlist'] = DataManager::getActionsbyItem('EntitySet',$mode,$edit_mode);
+        
+        $propid = $filter['filter_id']['id'];
+        $ptype = '';
+        if ($propid!='')
+        {
+            $arprop = Mdproperty::getProperty($propid);
+            $ptype = $arprop['type'];
+            $mdid = $arprop['mdid'];
+        }
+        else
+        {
+            if ($filter['itemid']['id']!='')
+            {
+                $mdid = $filter['itemid']['id'];
+            }
+            else 
+            {
+                return $objs;
+            }
+        }
+        $arMD = Mdentity::getMD($mdid);
+        $objs['MD'] =  array(
+                              'mdid'	=> $mdid,
+                              'mditem'	=> $arMD['mditem'],
+                              'mdsynonym'	=> $arMD['synonym'],
+                              'mdtypename'	=> $arMD['mdtypename'],
+                              'mdtypedescription'	=> $arMD['mdtypedescription']
+                              );
+	$offset=(int)($page-1)*$limit;
+        
         $entities = array();
         if (!User::isAdmin())
         {
             //вкл rls: добавим поля отбора в список реквизитов динамического списка
             $access_prop = self::get_access_prop();
+            
             $arr_prop = array_unique(array_column($access_prop,'propid'));
-            $expr = function($row) use ($arr_prop)
-            {
-                return (($row['ranktoset']==0)&&(!in_array($row['propid'], $arr_prop)));
-            };
+            $expr = function($row) use ($arr_prop) { return (($row['ranktoset']==0)&&(!in_array($row['propid'], $arr_prop))); };            
+
             foreach ($arr_prop as $prop)
             {
                 $props_templ = new PropsTemplate($prop);
@@ -321,34 +349,28 @@ class EntitySet extends Model {
         {
             $access_prop = array();
             $arr_prop = array();
-            $expr = function($row) 
-            {
-                return ($row['ranktoset']==0);
-            };
+            $expr = function($row){ return ($row['ranktoset']==0); };
         }    
+        $tt_et = '';
         if (!count($entities))
         {    
-            $entities = self::findEntitiesByProp($filter,$access_prop);
+            $tt_et = self::get_findEntitiesByProp('tt_et', $mdid, $propid, $ptype, $access_prop, $filter ,$limit);
+        }
+        else
+        {
+            $tt_et = self::get_EntitiesFromList($entities,'tt_et',$limit);
         }    
-        if (!count($entities))
+        if ($tt_et=='')
         {
             $objs['RES']='list entities is empty';
             return $objs;
         }
-        $arMD = Entity::getEntityDetails($entities[0]);
-        $mdid = $arMD['mdid'];
-        $objs['MD'] =  array(
-                              'mdid'	=> $mdid,
-                              'mditem'	=> $arMD['mditem'],
-                              'mdsynonym'	=> $arMD['mdsynonym'],
-                              'mdtypename'	=> $arMD['mdtypename'],
-                              'mdtypedescription'	=> $arMD['mdtypedescription']
-                              );
-	$offset=(int)($page-1)*$limit;
         
-	$artemptable = self::createtemptable_all($entities,$mdid);
+	$artemptable = self::createtemptable_all($tt_et,$mdid);
+        $artemptable[] = $tt_et;
 	$sql = "SELECT * FROM tt_pt";
 	$res = DataManager::dm_query($sql);	
+        $plist = array();
         while ($row = $res->fetch(PDO::FETCH_ASSOC))
         {
             if ($expr($row))
@@ -365,7 +387,7 @@ class EntitySet extends Model {
         $rls = array();
         $arr_id=array();
         $orderstr='';
-        $activity_id = array_search('Activity', array_column($plist,'name','id'));
+        $activity_id = array_search('activity', array_column($plist,'name','id'));
         foreach($plist as $row) 
         {
             $rid = $row['id'];
@@ -586,7 +608,8 @@ class EntitySet extends Model {
 	DataManager::droptemptable($artemptable);
 	return $objs;
     }
-    public static function getEntitiesToStr($entities,&$all_entities,&$data,&$count_req) {
+    public static function getEntitiesToStr($entities,&$all_entities,&$data,&$count_req) 
+    {
         // entities - массив ссылок
         $artemptable = self::createTempTableEntitiesToStr($entities,$count_req);
         $sql = "SELECT * FROM tt_t4";
@@ -750,5 +773,157 @@ class EntitySet extends Model {
 
         return $objs;
     }
+    public static function getEntitiesByName($mdid,$name) 
+    {
+        $artt = array();
+        if (!User::isAdmin())
+        {
+            $access_prop = self::get_access_prop();
+            $arr_prop = array_unique(array_column($access_prop,'propid'));
+        }
+        else 
+        {
+            $access_prop = array();
+            $arr_prop = array();
+        }
+        $mdentity = new Mdentity($mdid);
+        if ($mdentity->getmdtypename()=='Docs')
+        {
+            $sql = "select et.id, pv.value as name, it.dateupdate FROM \"PropValue_int\" as pv
+                    inner join \"IDTable\" as it
+                        inner join \"ETable\" as et
+                        on it.entityid=et.id
+                        inner join \"MDProperties\" as mp
+                            inner join \"CTable\" as pt
+                            on mp.propid=pt.id
+                        on it.propid=mp.id
+                    on pv.id=it.id";
+            $str_where = " WHERE et.mdid=:mdid and mp.mdid = et.mdid and pv.value = :name LIMIT 30";  
+            $params = array('mdid'=>$mdid, 'name'=>$name);
+        }   
+        else
+        {
+            $sql = "select et.id, pv.value as name, it.dateupdate FROM \"PropValue_str\" as pv
+                    inner join \"IDTable\" as it
+                        inner join \"ETable\" as et
+                        on it.entityid=et.id
+                        inner join \"MDProperties\" as mp
+                            inner join \"CTable\" as pt
+                            on mp.propid=pt.id
+                        on it.propid=mp.id
+                    on pv.id=it.id";
+            $str_where = " WHERE et.mdid=:mdid and mp.mdid = et.mdid and pv.value ILIKE :name LIMIT 30";  
+            $params = array('mdid'=>$mdid, 'name'=>"%$name%");
+        }    
+        $params_fin = array();
+        $sql_rls = '';
+        if (count($access_prop))
+        {
+            $arr_prop = array_unique(array_column($access_prop,'propid'));
+            $arr_eprop = array_column($mdentity->getarProps(), 'propid','id');
+            foreach ($arr_prop as $prop)
+            {
+                $isprop = array_search($prop, $arr_eprop);
+                if ($isprop===FALSE)
+                {
+                    //в текущем объекте нет реквизита с таким значением $prop
+                    continue;
+                }    
+                $str_val='';
+                foreach ($access_prop as $ap)
+                {
+                    if ($prop!=$ap['propid'])
+                    {
+                       continue;
+                    }    
+                    $propname = $ap['propname'];
+                    $rls_type = $ap['type'];
+                    if (($ap['rd']===true)||($ap['wr']===true))
+                    {
+                        $str_val .= ",'"."$ap[value]"."'";
+                    }    
+                }    
+                if ($str_val=='')
+                {
+                    return '';
+                }    
+                $str_val = "(".substr($str_val,1).")";
+                $props_templ = new PropsTemplate($prop);
+                if ($props_templ->getvalmdentity()->getid()==$mdid)    
+                {
+                    $sql_rls .= " INNER JOIN \"ETable\" as et_$propname ON et_$propname.id=et.id AND et_$propname.id IN $str_val";
+                }    
+                else
+                {    
+                    if (!in_array($prop, $params))
+                    {        
+                        $sql_rls .= " INNER JOIN \"IDTable\" as it_$propname inner join \"MDProperties\" as mp_$propname on it_$propname.propid=mp_$propname.id AND mp_$propname.propid=:$propname inner join \"PropValue_$rls_type\" as pv_$propname ON pv_$propname.id=it_$propname.id AND pv_$propname.value in $str_val ON it_$propname.entityid=et.id";
+                        $params[$propname]=$prop;
+                        $params_fin[$propname]=$prop;
+                    }    
+                }    
+          }    
+        }   
+        if ($sql_rls<>'')
+        {
+            $sql .= $sql_rls;
+        }    
+        $sql .= $str_where;
+        
+        $artt[] = DataManager::createtemptable($sql,'tt_et',$params);   
+        
+//        $sqlr = "select * from tt_et";
+//	$res = DataManager::dm_query($sqlr);
+//	die(var_dump($res->fetchAll(PDO::FETCH_ASSOC))." sql = ".$sql. var_dump($params));
+        
+        
+	$sql = "select id, max(dateupdate) as dateupdate FROM tt_et group by id";
+        $artt[] = DataManager::createtemptable($sql,'tt_nml');   
+        
+	$sql = "select et.id, et.name FROM tt_et as et inner join tt_nml as nm on et.id=nm.id and et.dateupdate=nm.dateupdate";
+        $artt[] = DataManager::createtemptable($sql,'tt_nm');   
+
+        
+	$sql = "select et.id, et.name, COALESCE(pv.value,TRUE) as activity, COALESCE(it.dateupdate,'epoch'::timestamp) as dateupdate FROM tt_nm as et 
+                left join \"IDTable\" as it
+                    inner join \"MDProperties\" as mp
+                    on it.propid=mp.id
+                    and mp.name='activity'
+                    inner join \"PropValue_bool\" as pv
+                    on it.id=pv.id
+                on et.id=it.entityid";  
+        $artt[] = DataManager::createtemptable($sql,'tt_act');   
+        
+	$sql = "select id, max(dateupdate) as dateupdate FROM tt_act group by id";
+        $artt[] = DataManager::createtemptable($sql,'tt_actl');   
+	$sql = "select et.id, et.name FROM tt_act as et inner join tt_actl as nm on et.id=nm.id and et.dateupdate=nm.dateupdate and et.activity";
+        if ($sql_rls<>'')
+        {
+            $sql .= $sql_rls;
+        }    
+        $sql .= " LIMIT 5";
+	$res = DataManager::dm_query($sql,$params_fin);
+	$objs = $res->fetchAll(PDO::FETCH_ASSOC);
+        DataManager::droptemptable($artt);
+        return $objs;
+    }
+    public static function search_by_name($mdid,$type,$name)
+    {
+        $objs = array();
+        if ($type=='id')
+        {
+            $objs = self::getEntitiesByName($mdid,$name);
+        }    
+        elseif ($type=='cid') 
+        {
+            $objs = tzVendor\CollectionSet::getCollByName($mdid,$name);
+        }
+        elseif ($type=='mdid') 
+        {
+            $objs = tzVendor\Mdentity::getMDbyName($name);
+        }
+        return $objs;
+    }        
+    
 }
 
